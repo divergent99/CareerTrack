@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+psycopg2-binary
+anthropic
+boto3
+python-dotenv
+requests
+pypdf
+tavily-python
+beautifulsoup4
