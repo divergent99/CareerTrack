@@ -5,6 +5,15 @@ from services.embeddings import get_embedding
 
 router = APIRouter()
 
+class InterviewRound(BaseModel):
+    round_number: int | None = None
+    round_type: str | None = None
+    date: str | None = None
+    questions_asked: str | None = None
+    self_rating: int | None = None
+    outcome: str | None = None
+    notes: str | None = None
+
 @router.post("/applications/{app_id}/interview-rounds")
 def log_interview_round(app_id: str, body: InterviewRound):
     conn = get_conn()
@@ -68,30 +77,6 @@ def update_application(app_id: str, body: UpdateApplication):
     cur.close()
     conn.close()
     return {"updated": app_id}
-
-class InterviewRound(BaseModel):
-    round_number: int | None = None
-    round_type: str | None = None
-    date: str | None = None
-    questions_asked: str | None = None
-    self_rating: int | None = None
-    outcome: str | None = None
-    notes: str | None = None
-
-@router.post("/applications/{app_id}/interview-rounds")
-def log_interview_round(app_id: str, body: InterviewRound):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO interview_rounds 
-        (application_id, round_number, round_type, date, questions_asked, self_rating, outcome, notes)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-    """, (app_id, body.round_number, body.round_type, body.date,
-          body.questions_asked, body.self_rating, body.outcome, body.notes))
-    conn.commit()
-    cur.close()
-    conn.close()
-    return {"logged": True}
 
 @router.get("/applications/{app_id}/interview-rounds")
 def get_interview_rounds(app_id: str):
