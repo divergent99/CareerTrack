@@ -54,34 +54,34 @@ Most job-tracking tools are spreadsheets with extra steps. They store *that* you
 ## Architecture
 
 ```
-┌─────────────┐      ┌──────────────────┐      ┌─────────────────────┐
-│  Gmail API   │─────▶│  Ingestion       │─────▶│                     │
-│  (read-only) │      │  (Python)        │      │                     │
-└─────────────┘      │  - fetch emails  │      │                     │
+┌─────────────┐        ┌──────────────────┐      ┌─────────────────────┐
+│  Gmail API   │─────> │  Ingestion       │─────>│                     │
+│  (read-only) │       │  (Python)        │      │                     │
+└─────────────┘        │  - fetch emails  │      │                     │
                        │  - classify via  │      │    CockroachDB      │
                        │    Claude        │      │    (Cloud, Basic)   │
-                       │  - dedupe by     │─────▶│                     │
+                       │  - dedupe by     │─────>│                     │
                        │    thread/company│      │  applications       │
                        └──────────────────┘      │  gmail_events       │
-                                                   │  interview_rounds   │
-┌─────────────┐      ┌──────────────────┐      │  job_leads          │
-│   React UI   │◀────▶│  FastAPI backend │◀────▶│  chat_sessions      │
-│  (Vite +     │      │  - chat (MCP)    │      │  chat_messages      │
-│  Tailwind)   │      │  - fast-path SQL │      │  (vector-indexed:   │
-└─────────────┘      │  - roadmap gen   │      │   jd_embedding,     │
+                                                 │  interview_rounds   │
+┌─────────────┐        ┌──────────────────┐      │  job_leads          │
+│   React UI  │<────>  │  FastAPI backend │<────>│  chat_sessions      │
+│  (Vite +    │        │  - chat (MCP)    │      │  chat_messages      │
+│  Tailwind)  │        │  - fast-path SQL │      │  (vector-indexed:   │
+└─────────────┘        │  - roadmap gen   │      │   jd_embedding,     │
                        │  - resume review │      │   questions_embed.) │
                        │  - github rank   │      └─────────────────────┘
                        └────────┬─────────┘
                                 │
                   ┌─────────────┼─────────────┐
                   ▼             ▼             ▼
-          ┌──────────────┐ ┌─────────┐ ┌──────────────┐
-          │ Claude API    │ │ Tavily  │ │ AWS Bedrock   │
-          │ (chat, MCP,   │ │ (company│ │ (Titan Text   │
-          │  classification,│ research)│ │  Embeddings   │
-          │  resume/GitHub │ └─────────┘ │  V2, 1024-dim)│
-          │  analysis)     │             └──────────────┘
-          └──────────────┘
+          ┌────────────────┐ ┌─────────┐ ┌───────────────┐
+          │ Claude API     │ │ Tavily  │ │ AWS Bedrock   │
+          │ (chat, MCP,    │ │ (company│ │ (Titan Text   │
+          │ classification,│ │research)│ │  Embeddings   │
+          │ resume/GitHub  │ └─────────┘ │  V2, 1024-dim)│
+          │ analysis)      │             └───────────────┘
+          └────────────────┘
 ```
 
 **Two distinct reasoning paths, by design:**
