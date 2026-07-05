@@ -1,4 +1,4 @@
-const BASE_URL = "http://127.0.0.1:8011";
+const BASE_URL = "https://careertrack-production-0af0.up.railway.app";
 
 export async function sendMessage(sessionId, message) {
   const res = await fetch(`${BASE_URL}/chat`, {
