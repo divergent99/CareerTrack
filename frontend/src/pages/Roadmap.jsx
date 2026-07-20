@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { generateRoadmap, lookupApplication, getApplications } from "../api";
+import PageLoading from "../components/PageLoading";
 
 const LOADING_PHRASES = [
   "Curating your roadmap",
@@ -38,10 +39,13 @@ export default function Roadmap() {
   const [jdText, setJdText] = useState("");
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [pageLoading, setPageLoading] = useState(true);
 
   useEffect(() => {
-    getApplications().then(setApplications);
+    getApplications().then(setApplications).finally(() => setPageLoading(false));
   }, []);
+
+  if (pageLoading) return <PageLoading page="interview roadmap" variant="form" />;
 
   const handleSelectExisting = async (companyName) => {
     setSelectedCompany(companyName);

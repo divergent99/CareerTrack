@@ -5,6 +5,7 @@ import {
 } from "recharts";
 import { Briefcase, XCircle, Clock } from "lucide-react";
 import { getSummary, getFunnel, getTimeline, getApplications, getCompanyInsights } from "../api";
+import PageLoading from "../components/PageLoading";
 
 const COLORS = ["#5227FF", "#8B5CF6", "#A78BFA", "#C4B5FD", "#7C3AED", "#6D28D9", "#4C1D95"];
 
@@ -83,7 +84,7 @@ export default function Dashboard() {
   }, []);
 
   if (!summary || !funnel || !timeline) {
-    return <div className="p-8 text-neutral-400">Loading...</div>;
+    return <PageLoading page="dashboard" variant="dashboard" />;
   }
 
   const funnelData = Object.entries(funnel.funnel).map(([stage, count]) => ({

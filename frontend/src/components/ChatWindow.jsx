@@ -10,6 +10,7 @@ import {
 } from "../api";
 import Message from "./Message";
 import TypingIndicator from "./TypingIndicator";
+import PageLoading from "./PageLoading";
 
 function getGreeting() {
   const hour = new Date().getHours();
@@ -66,6 +67,7 @@ export default function ChatWindow({ sessionId, onSessionCreated }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [sessionLoading, setSessionLoading] = useState(false);
   const [lastSentText, setLastSentText] = useState("");
   const [attachedFile, setAttachedFile] = useState(null);
   const fileInputRef = useRef(null);
@@ -73,15 +75,19 @@ export default function ChatWindow({ sessionId, onSessionCreated }) {
 
   useEffect(() => {
     if (sessionId) {
-      getSessionMessages(sessionId).then(setMessages);
+      setSessionLoading(true);
+      getSessionMessages(sessionId).then(setMessages).finally(() => setSessionLoading(false));
     } else {
       setMessages([]);
+      setSessionLoading(false);
     }
   }, [sessionId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
+
+  if (sessionLoading) return <PageLoading page="conversation" variant="chat" />;
 
   const handleFileSelect = (e) => {
     const file = e.target.files[0];

@@ -3,7 +3,9 @@ import anthropic
 from dotenv import load_dotenv
 
 load_dotenv()
-client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+client = anthropic.Anthropic(
+    api_key=os.environ["ANTHROPIC_API_KEY"], timeout=50.0, max_retries=0
+)
 
 SYSTEM_PROMPT = """You are CareerTrack's assistant. You have access to the user's job 
 application history in CockroachDB.
@@ -25,6 +27,9 @@ Tables:
 When answering questions, query the relevant tables via select_query. Be specific and 
 cite actual data, don't guess. If asked about patterns (e.g. "where do I get rejected 
 most"), run the actual aggregation query rather than estimating.
+
+Use at most two select_query calls per message. Prefer one query using joins,
+aggregations, or CTEs. Never retry the same query or explore the schema.
 
 For broad "summarize" style questions, only query applications and gmail_events. 
 Skip interview_rounds and job_leads unless specifically asked about interviews or leads.
@@ -48,7 +53,7 @@ def ask_claude(user_message, conversation_history=None):
 
     response = client.beta.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=4096,
+        max_tokens=1500,
         system=SYSTEM_PROMPT,
         messages=messages,
         mcp_servers=[

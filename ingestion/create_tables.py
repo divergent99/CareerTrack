@@ -64,6 +64,9 @@ CREATE TABLE IF NOT EXISTS job_leads (
 
 CREATE VECTOR INDEX IF NOT EXISTS applications_jd_idx ON applications (jd_embedding);
 CREATE VECTOR INDEX IF NOT EXISTS interview_rounds_q_idx ON interview_rounds (questions_embedding);
+CREATE INDEX IF NOT EXISTS applications_date_idx ON applications (date_applied DESC);
+CREATE INDEX IF NOT EXISTS gmail_events_application_date_idx ON gmail_events (application_id, email_date);
+CREATE INDEX IF NOT EXISTS interview_rounds_application_round_idx ON interview_rounds (application_id, round_number);
 """
 
 for statement in SCHEMA.strip().split(";"):

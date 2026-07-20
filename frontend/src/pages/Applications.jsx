@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getApplications, updateApplication, logInterviewRound, getInterviewRounds } from "../api";
+import PageLoading from "../components/PageLoading";
 
 const STATUS_OPTIONS = [
   "applied_confirmation", "screening_scheduled", "interview_scheduled",
@@ -143,9 +144,12 @@ function ApplicationRow({ app, onUpdated }) {
 export default function Applications() {
   const [apps, setApps] = useState([]);
   const [filter, setFilter] = useState("all");
+  const [loading, setLoading] = useState(true);
 
-  const load = () => getApplications().then(setApps);
+  const load = () => getApplications().then(setApps).finally(() => setLoading(false));
   useEffect(() => { load(); }, []);
+
+  if (loading) return <PageLoading page="applications" variant="list" />;
 
   const filtered = filter === "needs_attention"
     ? apps.filter((a) => !a.company || a.status === "other")

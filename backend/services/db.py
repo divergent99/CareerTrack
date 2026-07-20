@@ -24,7 +24,14 @@ def save_message(cur, session_id, role, content):
         (session_id,)
     )
 
-def get_session_messages(cur, session_id):
+def get_session_messages(cur, session_id, limit=None):
+    if limit:
+        cur.execute(
+            "SELECT role, content FROM (SELECT role, content, seq FROM chat_messages WHERE session_id = %s ORDER BY seq DESC LIMIT %s) recent ORDER BY seq ASC",
+            (session_id, limit),
+        )
+        return [{"role": r, "content": c} for r, c in cur.fetchall()]
+
     cur.execute(
         "SELECT role, content FROM chat_messages WHERE session_id = %s ORDER BY seq ASC",
         (session_id,)

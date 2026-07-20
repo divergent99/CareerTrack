@@ -5,4 +5,5 @@ __pycache__/
 .vite/
 dist/
 token.json
+token.expired.json
 credentials.json
