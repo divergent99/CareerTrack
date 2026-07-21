@@ -36,6 +36,25 @@ export async function deleteSession(sessionId) {
   const res = await fetch(`${BASE_URL}/sessions/${sessionId}`, {
     method: "DELETE",
   });
+  if (!res.ok) {
+    throw new Error(`Failed to delete chat (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function getSession(sessionId) {
+  const res = await fetch(`${BASE_URL}/sessions/${sessionId}`);
+  if (!res.ok) throw new Error(`Failed to load chat (${res.status})`);
+  return res.json();
+}
+
+export async function renameSession(sessionId, title) {
+  const res = await fetch(`${BASE_URL}/sessions/${sessionId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title }),
+  });
+  if (!res.ok) throw new Error(`Failed to rename chat (${res.status})`);
   return res.json();
 }
 

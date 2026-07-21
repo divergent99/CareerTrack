@@ -44,6 +44,23 @@ def list_sessions(cur):
     )
     return [{"id": str(i), "title": t, "updated_at": u.isoformat()} for i, t, u in cur.fetchall()]
 
+def get_session(cur, session_id):
+    cur.execute(
+        "SELECT id, title, updated_at FROM chat_sessions WHERE id = %s",
+        (session_id,)
+    )
+    row = cur.fetchone()
+    if not row:
+        return None
+    return {"id": str(row[0]), "title": row[1], "updated_at": row[2].isoformat()}
+
+def rename_session(cur, session_id, title):
+    cur.execute(
+        "UPDATE chat_sessions SET title = %s, updated_at = now() WHERE id = %s RETURNING id",
+        (title, session_id)
+    )
+    return cur.fetchone() is not None
+
 def delete_session(cur, session_id):
     cur.execute("DELETE FROM chat_messages WHERE session_id = %s", (session_id,))
     cur.execute("DELETE FROM chat_sessions WHERE id = %s", (session_id,))

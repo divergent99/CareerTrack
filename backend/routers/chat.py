@@ -7,7 +7,7 @@ import anthropic
 from services.mcp_client import ask_claude
 from services.db import (
     get_conn, create_session, save_message,
-    get_session_messages, list_sessions, delete_session
+    get_session_messages, list_sessions, get_session, rename_session, delete_session
 )
 
 router = APIRouter()
@@ -65,6 +65,9 @@ class SaveExchangeRequest(BaseModel):
     session_id: str | None = None
     user_message: str
     assistant_message: str
+
+class RenameSessionRequest(BaseModel):
+    title: str
 
 @router.post("/chat")
 def chat(req: ChatRequest):
@@ -143,6 +146,37 @@ def get_sessions():
     cur.close()
     conn.close()
     return sessions
+
+@router.get("/sessions/{session_id}")
+def get_session_details(session_id: str):
+    conn = get_conn()
+    cur = conn.cursor()
+    session = get_session(cur, session_id)
+    cur.close()
+    conn.close()
+    if not session:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Chat not found")
+    return session
+
+@router.patch("/sessions/{session_id}")
+def update_session(session_id: str, body: RenameSessionRequest):
+    title = body.title.strip()
+    if not title:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Title cannot be empty")
+
+    title = title[:80]
+    conn = get_conn()
+    cur = conn.cursor()
+    updated = rename_session(cur, session_id, title)
+    conn.commit()
+    cur.close()
+    conn.close()
+    if not updated:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Chat not found")
+    return {"id": session_id, "title": title}
 
 @router.get("/sessions/{session_id}/messages")
 def get_messages(session_id: str):

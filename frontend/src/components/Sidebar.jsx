@@ -6,17 +6,31 @@ import { Map } from "lucide-react";
 import { FileText } from "lucide-react";
 import { GitBranch } from "lucide-react";
 
-export default function Sidebar({ activeSessionId, onSelectSession, onNewChat }) {
+export default function Sidebar({ activeSessionId, onSelectSession, onNewChat, sessionRevision }) {
   const [sessions, setSessions] = useState([]);
+  const [deletingId, setDeletingId] = useState(null);
+  const [deleteError, setDeleteError] = useState("");
 
   const refresh = () => getSessions().then(setSessions);
-  useEffect(() => { refresh(); }, [activeSessionId]);
+  useEffect(() => { refresh(); }, [activeSessionId, sessionRevision]);
 
   const handleDelete = async (e, id) => {
+    e.preventDefault();
     e.stopPropagation();
-    await deleteSession(id);
-    if (id === activeSessionId) onNewChat();
-    refresh();
+    if (deletingId) return;
+
+    setDeletingId(id);
+    setDeleteError("");
+    try {
+      await deleteSession(id);
+      setSessions((current) => current.filter((session) => session.id !== id));
+      if (id === activeSessionId) onNewChat();
+    } catch (error) {
+      setDeleteError("Couldn't delete that chat. Please try again.");
+      console.error(error);
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   return (
@@ -59,24 +73,34 @@ export default function Sidebar({ activeSessionId, onSelectSession, onNewChat })
         {sessions.length === 0 && (
           <div className="text-xs text-neutral-600 px-2 py-4 text-center">No conversations yet</div>
         )}
+        {deleteError && (
+          <p className="px-2 py-2 text-xs text-red-400" role="alert">{deleteError}</p>
+        )}
         {sessions.map((s) => (
-          <Link
-            to="/"
+          <div
             key={s.id}
-            onClick={() => onSelectSession(s.id)}
-            className={`group flex items-center justify-between px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors ${
+            className={`group flex items-center rounded-lg text-sm transition-colors ${
               s.id === activeSessionId ? "bg-neutral-800" : "hover:bg-neutral-900"
             }`}
           >
-            <span className="truncate text-neutral-300">{s.title}</span>
-            <button
-              onClick={(e) => handleDelete(e, s.id)}
-              className="opacity-0 group-hover:opacity-100 text-neutral-600 hover:text-red-400 transition-opacity ml-2 shrink-0"
-              title="Delete chat"
+            <Link
+              to="/"
+              onClick={() => onSelectSession(s.id)}
+              className="min-w-0 flex-1 px-3 py-2 text-neutral-300"
             >
-              <Trash2 size={14} />
+              <span className="block truncate">{s.title}</span>
+            </Link>
+            <button
+              type="button"
+              onClick={(e) => handleDelete(e, s.id)}
+              disabled={deletingId === s.id}
+              className="mr-2 shrink-0 rounded-md p-1.5 text-neutral-600 opacity-40 transition-all hover:bg-red-500/10 hover:text-red-400 hover:opacity-100 group-hover:opacity-100 disabled:cursor-wait disabled:opacity-30"
+              title="Delete chat"
+              aria-label={`Delete ${s.title}`}
+            >
+              <Trash2 size={14} className={deletingId === s.id ? "animate-pulse" : ""} />
             </button>
-          </Link>
+          </div>
         ))}
       </div>
 

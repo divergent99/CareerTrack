@@ -12,6 +12,7 @@ import GithubAnalysis from "./pages/GithubAnalysis";
 export default function App() {
   const [activeSessionId, setActiveSessionId] = useState(null);
   const [githubResult, setGithubResult] = useState(null);
+  const [sessionRevision, setSessionRevision] = useState(0);
 
   return (
     <BrowserRouter>
@@ -20,6 +21,7 @@ export default function App() {
           activeSessionId={activeSessionId}
           onSelectSession={setActiveSessionId}
           onNewChat={() => setActiveSessionId(null)}
+          sessionRevision={sessionRevision}
         />
 
         <div className="relative flex-1 h-full">
@@ -44,7 +46,13 @@ export default function App() {
             <Routes>
               <Route
                 path="/"
-                element={<ChatWindow sessionId={activeSessionId} onSessionCreated={setActiveSessionId} />}
+                element={
+                  <ChatWindow
+                    sessionId={activeSessionId}
+                    onSessionCreated={setActiveSessionId}
+                    onSessionRenamed={() => setSessionRevision((value) => value + 1)}
+                  />
+                }
               />
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/applications" element={<Applications />} />

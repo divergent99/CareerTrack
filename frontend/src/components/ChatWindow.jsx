@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { Paperclip, X, ArrowUp } from "lucide-react";
+import { Paperclip, X, ArrowUp, Pencil, Check } from "lucide-react";
 import {
   sendMessage,
   saveFastPathExchange,
   getSessionMessages,
+  getSession,
+  renameSession,
   getSummary,
   getFunnel,
   getCompanyStatusWithResearch,
@@ -63,22 +65,35 @@ const SUGGESTIONS = [
   },
 ];
 
-export default function ChatWindow({ sessionId, onSessionCreated }) {
+export default function ChatWindow({ sessionId, onSessionCreated, onSessionRenamed }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [sessionLoading, setSessionLoading] = useState(false);
   const [lastSentText, setLastSentText] = useState("");
   const [attachedFile, setAttachedFile] = useState(null);
+  const [sessionTitle, setSessionTitle] = useState("New chat");
+  const [titleDraft, setTitleDraft] = useState("");
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [savingTitle, setSavingTitle] = useState(false);
   const fileInputRef = useRef(null);
   const bottomRef = useRef(null);
 
   useEffect(() => {
     if (sessionId) {
       setSessionLoading(true);
-      getSessionMessages(sessionId).then(setMessages).finally(() => setSessionLoading(false));
+      Promise.all([getSessionMessages(sessionId), getSession(sessionId)])
+        .then(([sessionMessages, session]) => {
+          setMessages(sessionMessages);
+          setSessionTitle(session.title);
+          setTitleDraft(session.title);
+        })
+        .finally(() => setSessionLoading(false));
     } else {
       setMessages([]);
+      setSessionTitle("New chat");
+      setTitleDraft("");
+      setEditingTitle(false);
       setSessionLoading(false);
     }
   }, [sessionId]);
@@ -92,6 +107,21 @@ export default function ChatWindow({ sessionId, onSessionCreated }) {
   const handleFileSelect = (e) => {
     const file = e.target.files[0];
     if (file) setAttachedFile(file);
+  };
+
+  const saveTitle = async () => {
+    const title = titleDraft.trim();
+    if (!sessionId || !title || savingTitle) return;
+    setSavingTitle(true);
+    try {
+      const updated = await renameSession(sessionId, title);
+      setSessionTitle(updated.title);
+      setTitleDraft(updated.title);
+      setEditingTitle(false);
+      onSessionRenamed?.();
+    } finally {
+      setSavingTitle(false);
+    }
   };
 
   const handleSend = async (overrideText, fastPath) => {
@@ -126,9 +156,40 @@ export default function ChatWindow({ sessionId, onSessionCreated }) {
   return (
     <div className="flex-1 flex flex-col h-full">
       <div className="h-14 flex items-center px-6 border-b border-neutral-800 shrink-0 bg-neutral-950">
-        <span className="text-sm text-neutral-300 font-medium">
-          {sessionId ? "CareerTrack" : "New chat"}
-        </span>
+        {editingTitle ? (
+          <div className="flex items-center gap-1.5">
+            <input
+              autoFocus
+              value={titleDraft}
+              maxLength={80}
+              onChange={(e) => setTitleDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") saveTitle();
+                if (e.key === "Escape") {
+                  setTitleDraft(sessionTitle);
+                  setEditingTitle(false);
+                }
+              }}
+              className="w-72 rounded-md border border-neutral-700 bg-neutral-900 px-2.5 py-1.5 text-sm text-neutral-100 outline-none focus:border-violet-500"
+              aria-label="Chat title"
+            />
+            <button type="button" onClick={saveTitle} disabled={!titleDraft.trim() || savingTitle} className="rounded-md p-1.5 text-green-400 hover:bg-neutral-800 disabled:text-neutral-600" aria-label="Save chat title">
+              <Check size={15} />
+            </button>
+            <button type="button" onClick={() => { setTitleDraft(sessionTitle); setEditingTitle(false); }} className="rounded-md p-1.5 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200" aria-label="Cancel renaming">
+              <X size={15} />
+            </button>
+          </div>
+        ) : (
+          <div className="group flex min-w-0 items-center gap-2">
+            <span className="max-w-md truncate text-sm font-medium text-neutral-300">{sessionTitle}</span>
+            {sessionId && (
+              <button type="button" onClick={() => setEditingTitle(true)} className="rounded-md p-1.5 text-neutral-600 opacity-50 transition-all hover:bg-neutral-800 hover:text-neutral-200 hover:opacity-100 group-hover:opacity-100" title="Rename chat" aria-label="Rename chat">
+                <Pencil size={13} />
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto flex flex-col relative z-10">
