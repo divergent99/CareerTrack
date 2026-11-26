@@ -138,19 +138,31 @@ export default function ChatWindow({ sessionId, onSessionCreated, onSessionRenam
     setLoading(true);
 
     if (fastPath) {
-      const reply = await fastPath();
-      setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
-      setLoading(false);
-
-      const res = await saveFastPathExchange(finalText, reply, sessionId);
-      if (!sessionId) onSessionCreated(res.session_id);
+      try {
+        const reply = await fastPath();
+        setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
+        const res = await saveFastPathExchange(finalText, reply, sessionId);
+        if (!sessionId && res.session_id) onSessionCreated(res.session_id);
+      } catch (err) {
+        setMessages((prev) => [...prev, { role: "assistant", content: `Something went wrong (${err.message}). Try again.` }]);
+      } finally {
+        setLoading(false);
+      }
       return;
     }
 
-    const res = await sendMessage(sessionId, finalText);
-    if (!sessionId) onSessionCreated(res.session_id);
-    setMessages((prev) => [...prev, { role: "assistant", content: res.reply }]);
-    setLoading(false);
+    try {
+      const res = await sendMessage(sessionId, finalText);
+      if (!sessionId && res.session_id) onSessionCreated(res.session_id);
+      setMessages((prev) => [...prev, { role: "assistant", content: res.reply || "No reply came back. Try again." }]);
+    } catch (err) {
+      const msg = err.name === "AbortError"
+        ? "That took too long and was cancelled. Try again or narrow the question."
+        : `Something went wrong (${err.message}). Try again.`;
+      setMessages((prev) => [...prev, { role: "assistant", content: msg }]);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (

@@ -1,12 +1,20 @@
 const BASE_URL = "https://careertrack-production-0af0.up.railway.app";
 
 export async function sendMessage(sessionId, message) {
-  const res = await fetch(`${BASE_URL}/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session_id: sessionId, message }),
-  });
-  return res.json();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 90000);
+  try {
+    const res = await fetch(`${BASE_URL}/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, message }),
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(`Server error ${res.status}`);
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function saveFastPathExchange(userMessage, assistantMessage, sessionId = null) {

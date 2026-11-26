@@ -164,6 +164,10 @@ def chat(req: ChatRequest):
         except psycopg2.Error:
             logger.exception("Chat agent database error")
             reply = "Couldn't reach the database just now. Please try again."
+        except Exception as e:
+            # Never 500 here: the frontend would just spin forever.
+            logger.exception("Chat agent crashed")
+            reply = f"Chat failed: {type(e).__name__}: {str(e)[:200]}"
         conn = get_conn()
         cur = conn.cursor()
 
