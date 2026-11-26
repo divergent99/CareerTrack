@@ -215,62 +215,72 @@ TOOLS = [
 
 # ---------- prompt ----------
 
-SYSTEM_TEMPLATE = """You are CareerTrack's assistant. You answer questions about the user's own job search using their database.
+SYSTEM_TEMPLATE = """You are CareerTrack, Abhineet's job-search copilot. You talk like a sharp friend who happens to have his entire application history in front of them: casual, direct, a little dry humor is fine.
 
 Today's date: {today}
 
-Database schema (live, embedding columns omitted):
+You have a run_sql tool over his job-search database. Schema (live, embedding columns omitted):
 {schema}
 
-Rules for accuracy:
-- Every number, company, date, status or interview detail you state must come from a run_sql result in this conversation. If you did not query it, do not state it.
-- If a query returns 0 rows, say you found nothing for that. Do not fill the gap with guesses or general advice dressed up as their data.
-- Filter categorical columns only with the exact values listed above. Match company/role text with ILIKE '%term%', never exact equality.
-- Resolve relative dates ("last month", "this week") against today's date.
-- If a query errors, fix it and retry once. Do not explore the schema, you already have it.
-- Prefer a single query with joins, aggregates or CTEs. Use at most 3 queries per answer.
-- If the question can't be answered from these tables, say so plainly.
-
-Style: answer directly like a colleague stating a fact. No greetings, no "let me check", no narrating queries, no exclamation marks, no unsolicited follow-up offers. Use markdown tables for multi-row results. For pure acknowledgments (thanks, ok, cool) reply in a few words without querying."""
+How to behave:
+- Be conversational. Greetings, small talk, follow-ups like "are you sure?" or "why?", and general career or interview advice can be answered naturally. Don't query for those unless his data actually matters to the answer.
+- Anything about HIS data (counts, companies, statuses, dates, interview questions, outcomes) must come from run_sql results in this conversation. Never state a number or company from memory or assumption. If asked "are you sure?" about data, re-run a query to verify rather than just repeating yourself.
+- When you mix general advice with his data, make it clear which part is from his records.
+- If a query returns nothing, say so plainly. Don't paper over it.
+- Filter categorical columns only with the exact values listed above. Match company/role text with ILIKE '%term%'. Resolve relative dates against today's date.
+- Prefer one query with joins/aggregates/CTEs. At most 3 queries per answer. If a query errors, fix it once.
+- Don't write anything before a tool call. Don't narrate ("let me check"). Just query, then answer.
+- Keep answers tight. Markdown tables for multi-row data. No exclamation marks, no "Great question", no ending every reply with an offer."""
 
 
 def _system_blocks():
     text = SYSTEM_TEMPLATE.format(today=date.today().isoformat(), schema=get_schema_text())
-    # Cache the big static prefix so repeat turns are faster/cheaper.
     return [{"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}]
+
+
+def _clean_history(history, user_message):
+    """Alternating user/assistant turns ending with the new user message.
+    Earlier failed requests can leave two user turns in a row; merge them."""
+    msgs = []
+    for m in (history or []) + [{"role": "user", "content": user_message}]:
+        content = (m.get("content") or "").strip()
+        if not content or m.get("role") not in ("user", "assistant"):
+            continue
+        if msgs and msgs[-1]["role"] == m["role"]:
+            msgs[-1]["content"] += "\n\n" + content
+        else:
+            msgs.append({"role": m["role"], "content": content})
+    while msgs and msgs[0]["role"] != "user":
+        msgs.pop(0)
+    return msgs
 
 
 # ---------- agent loop ----------
 
-def ask_claude(user_message, conversation_history=None):
-    messages = [
-        {"role": m["role"], "content": m["content"]}
-        for m in (conversation_history or [])
-        if m.get("content")
-    ]
-    # API requires the first message to be from the user.
-    while messages and messages[0]["role"] != "user":
-        messages.pop(0)
-    messages.append({"role": "user", "content": user_message})
-
+def stream_agent(user_message, conversation_history=None):
+    """Yields events: {"type": "status"|"delta"|"reset", ...}. Final text is the
+    concatenation of deltas after the last reset."""
+    messages = _clean_history(conversation_history, user_message)
     t0 = time.perf_counter()
     system = _system_blocks()
     logger.info("chat_schema duration_ms=%d", round((time.perf_counter() - t0) * 1000))
 
     for turn in range(MAX_TOOL_TURNS + 1):
-        force_answer = turn == MAX_TOOL_TURNS
         kwargs = dict(
-            model=MODEL,
-            max_tokens=2000,
-            temperature=0,
-            system=system,
-            messages=messages,
-            tools=TOOLS,
+            model=MODEL, max_tokens=2000, temperature=0.3,
+            system=system, messages=messages, tools=TOOLS,
         )
-        if force_answer:
+        if turn == MAX_TOOL_TURNS:
             kwargs["tool_choice"] = {"type": "none"}
+
         t0 = time.perf_counter()
-        response = client.messages.create(**kwargs)
+        emitted = False
+        with client.messages.stream(**kwargs) as stream:
+            for event in stream:
+                if event.type == "text" and event.text:
+                    emitted = True
+                    yield {"type": "delta", "text": event.text}
+            response = stream.get_final_message()
         u = response.usage
         logger.info(
             "chat_llm turn=%d duration_ms=%d stop=%s in=%s cached=%s out=%s",
@@ -279,21 +289,23 @@ def ask_claude(user_message, conversation_history=None):
         )
 
         if response.stop_reason != "tool_use":
-            text = "".join(b.text for b in response.content if b.type == "text").strip()
-            return text or "I couldn't produce an answer for that. Try rephrasing."
+            return
 
+        if emitted:
+            # Model talked before calling a tool; drop that preamble.
+            yield {"type": "reset"}
         messages.append({"role": "assistant", "content": response.content})
         results = []
         for block in response.content:
             if block.type != "tool_use":
                 continue
-            t0 = time.perf_counter()
+            yield {"type": "status", "text": "Checking your data"}
+            t1 = time.perf_counter()
             result = run_sql(block.input.get("query", ""))
             logger.info(
                 "chat_sql duration_ms=%d rows=%s error=%s",
-                round((time.perf_counter() - t0) * 1000),
-                result.get("row_count"),
-                result.get("error"),
+                round((time.perf_counter() - t1) * 1000),
+                result.get("row_count"), result.get("error"),
             )
             results.append({
                 "type": "tool_result",
@@ -302,5 +314,15 @@ def ask_claude(user_message, conversation_history=None):
                 "is_error": "error" in result,
             })
         messages.append({"role": "user", "content": results})
+        yield {"type": "status", "text": "Writing it up"}
 
-    return "I couldn't produce an answer for that. Try rephrasing."
+
+def ask_claude(user_message, conversation_history=None):
+    """Non-streaming wrapper (used by the plain /chat endpoint)."""
+    text = ""
+    for ev in stream_agent(user_message, conversation_history):
+        if ev["type"] == "delta":
+            text += ev["text"]
+        elif ev["type"] == "reset":
+            text = ""
+    return text.strip() or "I couldn't produce an answer for that. Try rephrasing."

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Paperclip, X, ArrowUp, Pencil, Check } from "lucide-react";
 import {
-  sendMessage,
+  streamMessage,
   saveFastPathExchange,
   getSessionMessages,
   getSession,
@@ -19,12 +19,6 @@ function getGreeting() {
   if (hour < 12) return "Good Morning";
   if (hour < 17) return "Good Afternoon";
   return "Good Evening";
-}
-
-const ACK_PATTERNS = /^(thanks?|thank you|thx|ok(ay)?|cool|got it|nice|sheesh|great|awesome|perfect)[\s!.]*$/i;
-
-function isAcknowledgment(text) {
-  return ACK_PATTERNS.test(text.trim());
 }
 
 const SUGGESTIONS = [
@@ -70,7 +64,10 @@ export default function ChatWindow({ sessionId, onSessionCreated, onSessionRenam
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [sessionLoading, setSessionLoading] = useState(false);
-  const [lastSentText, setLastSentText] = useState("");
+  const [status, setStatus] = useState("Thinking");
+  // Set when this window creates a session itself, so the sessionId change
+  // that follows doesn't wipe the screen and reload what's already shown.
+  const createdHereRef = useRef(null);
   const [attachedFile, setAttachedFile] = useState(null);
   const [sessionTitle, setSessionTitle] = useState("New chat");
   const [titleDraft, setTitleDraft] = useState("");
@@ -80,6 +77,16 @@ export default function ChatWindow({ sessionId, onSessionCreated, onSessionRenam
   const bottomRef = useRef(null);
 
   useEffect(() => {
+    if (sessionId && createdHereRef.current === sessionId) {
+      createdHereRef.current = null;
+      getSession(sessionId)
+        .then((session) => {
+          setSessionTitle(session.title);
+          setTitleDraft(session.title);
+        })
+        .catch(() => {});
+      return;
+    }
     if (sessionId) {
       setSessionLoading(true);
       Promise.all([getSessionMessages(sessionId), getSession(sessionId)])
@@ -134,7 +141,7 @@ export default function ChatWindow({ sessionId, onSessionCreated, onSessionRenam
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
     setAttachedFile(null);
-    setLastSentText(text);
+    setStatus("Thinking");
     setLoading(true);
 
     if (fastPath) {
@@ -142,7 +149,10 @@ export default function ChatWindow({ sessionId, onSessionCreated, onSessionRenam
         const reply = await fastPath();
         setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
         const res = await saveFastPathExchange(finalText, reply, sessionId);
-        if (!sessionId && res.session_id) onSessionCreated(res.session_id);
+        if (!sessionId && res.session_id) {
+          createdHereRef.current = res.session_id;
+          onSessionCreated(res.session_id);
+        }
       } catch (err) {
         setMessages((prev) => [...prev, { role: "assistant", content: `Something went wrong (${err.message}). Try again.` }]);
       } finally {
@@ -151,17 +161,46 @@ export default function ChatWindow({ sessionId, onSessionCreated, onSessionRenam
       return;
     }
 
+    let newSessionId = null;
+    let started = false;
+    const setReply = (updater) => {
+      const replaceLast = started; // capture now; updaters run later
+      setMessages((prev) => {
+        const current = replaceLast ? prev[prev.length - 1].content : "";
+        const next = { role: "assistant", content: updater(current) };
+        return replaceLast ? [...prev.slice(0, -1), next] : [...prev, next];
+      });
+    };
+
     try {
-      const res = await sendMessage(sessionId, finalText);
-      if (!sessionId && res.session_id) onSessionCreated(res.session_id);
-      setMessages((prev) => [...prev, { role: "assistant", content: res.reply || "No reply came back. Try again." }]);
+      await streamMessage(sessionId, finalText, (ev) => {
+        if (ev.type === "session") {
+          if (!sessionId) newSessionId = ev.session_id;
+        } else if (ev.type === "status") {
+          setStatus(ev.status ?? ev.text);
+        } else if (ev.type === "delta") {
+          setLoading(false);
+          setReply((cur) => cur + ev.text);
+          started = true;
+        } else if (ev.type === "reset" && started) {
+          setMessages((prev) => prev.slice(0, -1));
+          started = false;
+          setLoading(true);
+        }
+      });
+      if (!started) setReply(() => "No reply came back. Try again.");
     } catch (err) {
       const msg = err.name === "AbortError"
         ? "That took too long and was cancelled. Try again or narrow the question."
         : `Something went wrong (${err.message}). Try again.`;
-      setMessages((prev) => [...prev, { role: "assistant", content: msg }]);
+      if (started) setReply((cur) => `${cur}\n\n_${msg}_`);
+      else setReply(() => msg);
     } finally {
       setLoading(false);
+      if (newSessionId) {
+        createdHereRef.current = newSessionId;
+        onSessionCreated(newSessionId);
+      }
     }
   };
 
@@ -231,7 +270,7 @@ export default function ChatWindow({ sessionId, onSessionCreated, onSessionRenam
             {messages.map((m, i) => (
               <Message key={i} role={m.role} content={m.content} />
             ))}
-            {loading && <TypingIndicator isSimple={isAcknowledgment(lastSentText)} />}
+            {loading && <TypingIndicator status={status} />}
             <div ref={bottomRef} />
           </div>
         )}

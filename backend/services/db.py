@@ -27,6 +27,7 @@ class PooledConn:
     """Drop-in for a psycopg2 connection whose close() returns it to the pool."""
 
     def __init__(self):
+        object.__setattr__(self, "_conn", None)
         p = _get_pool()
         conn = p.getconn()
         # Cockroach Cloud drops idle connections; ping ones that sat a while.
@@ -38,23 +39,40 @@ class PooledConn:
             except psycopg2.Error:
                 p.putconn(conn, close=True)
                 conn = p.getconn()
-        self._conn = conn
+        object.__setattr__(self, "_conn", conn)
 
     def __getattr__(self, name):
-        return getattr(self._conn, name)
+        conn = object.__getattribute__(self, "_conn")
+        if conn is None:
+            raise psycopg2.InterfaceError("connection already returned to pool")
+        return getattr(conn, name)
+
+    def __setattr__(self, name, value):
+        setattr(object.__getattribute__(self, "_conn"), name, value)
 
     def close(self):
-        conn, self._conn = self._conn, None
+        conn = object.__getattribute__(self, "_conn")
+        object.__setattr__(self, "_conn", None)
         if conn is None:
             return
         broken = bool(conn.closed)
         if not broken:
             try:
                 conn.rollback()
+                if conn.autocommit:
+                    conn.autocommit = False
             except psycopg2.Error:
                 broken = True
         _last_used[id(conn)] = time.time()
         _get_pool().putconn(conn, close=broken)
+
+    def __del__(self):
+        # A request that died without close() must not leave its connection
+        # checked out with an open transaction holding row locks.
+        try:
+            self.close()
+        except Exception:
+            pass
 
 
 def get_conn():

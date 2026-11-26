@@ -17,6 +17,41 @@ export async function sendMessage(sessionId, message) {
   }
 }
 
+// Streams one chat turn. onEvent gets {type: "session"|"status"|"delta"|"reset"|"done", ...}.
+export async function streamMessage(sessionId, message, onEvent) {
+  const controller = new AbortController();
+  let timer = setTimeout(() => controller.abort(), 90000);
+  try {
+    const res = await fetch(`${BASE_URL}/chat/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, message }),
+      signal: controller.signal,
+    });
+    if (!res.ok || !res.body) throw new Error(`Server error ${res.status}`);
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      // Any data resets the idle timeout; only a silent connection gets cut.
+      clearTimeout(timer);
+      timer = setTimeout(() => controller.abort(), 90000);
+      buffer += decoder.decode(value, { stream: true });
+      const chunks = buffer.split("\n\n");
+      buffer = chunks.pop();
+      for (const chunk of chunks) {
+        const line = chunk.split("\n").find((l) => l.startsWith("data: "));
+        if (line) onEvent(JSON.parse(line.slice(6)));
+      }
+    }
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function saveFastPathExchange(userMessage, assistantMessage, sessionId = null) {
   const res = await fetch(`${BASE_URL}/chat/save`, {
     method: "POST",
