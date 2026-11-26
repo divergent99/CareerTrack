@@ -31,6 +31,27 @@ _FAST_SUMMARY = re.compile(
 )
 
 
+_SMALL_TALK = re.compile(
+    r"^(hi+|hey+|hello+|hii+|yo|sup|hola|namaste|good (morning|afternoon|evening)|"
+    r"thanks?( you)?|thank u|thx|ty|ok(ay)?|k|cool|got it|nice|great|awesome|perfect|sheesh|"
+    r"bye|see ya|cya|good night)( there| claude| buddy| man| bro)?$"
+)
+
+
+def small_talk_reply(message):
+    """Instant reply for greetings/acks so they never touch the DB-backed agent."""
+    text = re.sub(r"\s+", " ", re.sub(r"[^a-z ]", " ", message.lower())).strip()
+    if not _SMALL_TALK.match(text):
+        return None
+    if re.match(r"^(thanks?|thank u|thx|ty)", text):
+        return "Anytime."
+    if re.match(r"^(bye|see ya|cya|good night)", text):
+        return "Later. Good luck out there."
+    if re.match(r"^(ok|k|cool|got it|nice|great|awesome|perfect|sheesh)", text):
+        return "Sure thing."
+    return "Hey. Ask me anything about your applications, interviews, or leads."
+
+
 def try_fast_answer(cur, message):
     """Answer a few exact canned analytics questions without invoking the agent."""
     text = re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", " ", message.lower())).strip()
@@ -96,18 +117,20 @@ def chat(req: ChatRequest):
     if not session_id:
         title = req.message[:40]
         session_id = str(create_session(cur, title))
-        conn.commit()
 
     history = get_session_messages(cur, session_id, limit=12)
     save_message(cur, session_id, "user", req.message)
-    conn.commit()
 
-    reply = try_fast_answer(cur, req.message)
-    path = "sql"
+    reply = small_talk_reply(req.message)
+    path = "small_talk"
+    if reply is None:
+        reply = try_fast_answer(cur, req.message)
+        path = "sql"
 
     # A remote agent call must not hold an idle CockroachDB connection.
     if reply is None:
         path = "agent"
+        conn.commit()
         cur.close()
         conn.close()
         try:
