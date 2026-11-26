@@ -267,7 +267,7 @@ def stream_agent(user_message, conversation_history=None):
 
     for turn in range(MAX_TOOL_TURNS + 1):
         kwargs = dict(
-            model=MODEL, max_tokens=2000, temperature=0.3,
+            model=MODEL, max_tokens=2000,
             system=system, messages=messages, tools=TOOLS,
         )
         if turn == MAX_TOOL_TURNS:
