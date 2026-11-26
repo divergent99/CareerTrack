@@ -38,9 +38,26 @@ _SMALL_TALK = re.compile(
 )
 
 
+_CONFUSED = re.compile(
+    r"^(|what|wut|wat|huh|hm+|eh|what do you mean|what is this|wtf|"
+    r"help|who are you|what are you|what can you do|what can i ask|how does this work)$"
+)
+
+HELP_REPLY = (
+    "I answer questions about your job search from your tracked data. Try:\n\n"
+    "- How many applications am I tracking?\n"
+    "- Where do I keep getting rejected?\n"
+    "- What's the status of my Coforge application?\n"
+    "- Which companies rejected me after an interview?\n"
+    "- What did they ask in my last technical round?"
+)
+
+
 def small_talk_reply(message):
-    """Instant reply for greetings/acks so they never touch the DB-backed agent."""
+    """Instant reply for greetings/acks/vague messages so they never hit the agent."""
     text = re.sub(r"\s+", " ", re.sub(r"[^a-z ]", " ", message.lower())).strip()
+    if _CONFUSED.match(text):
+        return HELP_REPLY
     if not _SMALL_TALK.match(text):
         return None
     if re.match(r"^(thanks?|thank u|thx|ty)", text):
