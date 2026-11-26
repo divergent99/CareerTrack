@@ -4,6 +4,7 @@ import logging
 import re
 import time
 import anthropic
+import psycopg2
 from services.mcp_client import ask_claude
 from services.db import (
     get_conn, create_session, save_message,
@@ -14,11 +15,27 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-def try_fast_answer(cur, message):
-    """Answer common analytics without invoking the MCP agent."""
-    text = re.sub(r"[^a-z0-9 ]", " ", message.lower())
+# Only exact, filter-free phrasings go to the SQL fast path. Anything with a
+# company, date, stage etc. must go to the agent, otherwise e.g. "how many
+# applications to Google in October" would get the global total back.
+_FAST_COUNT = re.compile(
+    r"^(how many|number of|count( of)?|total)( job)? applications?"
+    r"( (have i|did i|do i have|am i))?( (sent|made|tracked|tracking|submitted|applied|in total|so far|total))*$"
+)
+_FAST_FUNNEL = re.compile(
+    r"^(show( me)?( my)? )?(pipeline|funnel)( breakdown)?$"
+    r"|^where do i (keep )?get(ting)? rejected( the)?( most)?$"
+)
+_FAST_SUMMARY = re.compile(
+    r"^(summary|summarize|overview)( of)?( my)?( job search| applications| progress)( so far)?$"
+)
 
-    if re.search(r"\b(how many|number of|count)\b.*\bapplications?\b", text):
+
+def try_fast_answer(cur, message):
+    """Answer a few exact canned analytics questions without invoking the agent."""
+    text = re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", " ", message.lower())).strip()
+
+    if _FAST_COUNT.match(text):
         cur.execute("""
             SELECT count(*), count(*) FILTER (WHERE status IN
                 ('rejection_after_application', 'rejection_after_interview'))
@@ -27,7 +44,7 @@ def try_fast_answer(cur, message):
         total, rejections = cur.fetchone()
         return f"You're tracking **{total} applications**, including **{rejections} rejections**."
 
-    if re.search(r"\b(funnel|pipeline|where.*reject|rejection.*stage)\b", text):
+    if _FAST_FUNNEL.match(text):
         cur.execute("""
             SELECT CASE
                 WHEN status IN ('applied_confirmation', 'other') THEN 'applied'
@@ -42,7 +59,7 @@ def try_fast_answer(cur, message):
         rows = "\n".join(f"| {stage} | {count} |" for stage, count in cur.fetchall())
         return f"Here's your pipeline breakdown:\n\n| Stage | Count |\n|---|---:|\n{rows}"
 
-    if re.search(r"\b(summary|summarize|overview)\b.*\b(job search|applications?|progress)\b", text):
+    if _FAST_SUMMARY.match(text):
         cur.execute("""
             SELECT status, count(*) FROM applications
             GROUP BY status ORDER BY count(*) DESC
@@ -90,20 +107,23 @@ def chat(req: ChatRequest):
 
     # A remote agent call must not hold an idle CockroachDB connection.
     if reply is None:
-        path = "mcp"
+        path = "agent"
         cur.close()
         conn.close()
         try:
             reply = ask_claude(req.message, conversation_history=history)
         except (anthropic.APITimeoutError, anthropic.APIConnectionError):
-            logger.warning("Chat MCP request timed out", exc_info=True)
+            logger.warning("Chat agent request timed out", exc_info=True)
             reply = (
-                "That analysis exceeded the 50-second limit. Try narrowing the question "
+                "That analysis took too long. Try narrowing the question "
                 "to a company, date range, pipeline stage, or interview topic."
             )
         except anthropic.APIError:
-            logger.exception("Chat MCP request failed")
+            logger.exception("Chat agent request failed")
             reply = "The analysis service failed to respond. Please try again."
+        except psycopg2.Error:
+            logger.exception("Chat agent database error")
+            reply = "Couldn't reach the database just now. Please try again."
         conn = get_conn()
         cur = conn.cursor()
 
