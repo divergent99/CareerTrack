@@ -23,7 +23,9 @@ from dotenv import load_dotenv
 load_dotenv()
 logger = logging.getLogger(__name__)
 
-MODEL = os.environ.get("CHAT_MODEL", "claude-sonnet-4-6")
+# Haiku is several times faster per call than Sonnet and plenty for
+# text-to-SQL with the full schema in the prompt. Override via CHAT_MODEL.
+MODEL = os.environ.get("CHAT_MODEL", "claude-haiku-4-5")
 MAX_TOOL_TURNS = 4
 MAX_ROWS = 100
 MAX_CELL_CHARS = 400
@@ -251,7 +253,9 @@ def ask_claude(user_message, conversation_history=None):
         messages.pop(0)
     messages.append({"role": "user", "content": user_message})
 
+    t0 = time.perf_counter()
     system = _system_blocks()
+    logger.info("chat_schema duration_ms=%d", round((time.perf_counter() - t0) * 1000))
 
     for turn in range(MAX_TOOL_TURNS + 1):
         force_answer = turn == MAX_TOOL_TURNS
@@ -265,7 +269,14 @@ def ask_claude(user_message, conversation_history=None):
         )
         if force_answer:
             kwargs["tool_choice"] = {"type": "none"}
+        t0 = time.perf_counter()
         response = client.messages.create(**kwargs)
+        u = response.usage
+        logger.info(
+            "chat_llm turn=%d duration_ms=%d stop=%s in=%s cached=%s out=%s",
+            turn, round((time.perf_counter() - t0) * 1000), response.stop_reason,
+            u.input_tokens, getattr(u, "cache_read_input_tokens", None), u.output_tokens,
+        )
 
         if response.stop_reason != "tool_use":
             text = "".join(b.text for b in response.content if b.type == "text").strip()
