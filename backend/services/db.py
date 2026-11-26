@@ -1,11 +1,64 @@
 import os
+import threading
+import time
 import psycopg2
+from psycopg2 import pool
 from dotenv import load_dotenv
 
 load_dotenv()
 
+# Opening a TLS connection to Cockroach Cloud costs hundreds of ms, and every
+# route opened a fresh one per request. Reuse a small pool instead.
+_pool = None
+_pool_lock = threading.Lock()
+_last_used = {}
+IDLE_CHECK_SECONDS = 60
+
+
+def _get_pool():
+    global _pool
+    with _pool_lock:
+        if _pool is None:
+            _pool = pool.ThreadedConnectionPool(1, 8, os.environ["COCKROACH_URL"])
+        return _pool
+
+
+class PooledConn:
+    """Drop-in for a psycopg2 connection whose close() returns it to the pool."""
+
+    def __init__(self):
+        p = _get_pool()
+        conn = p.getconn()
+        # Cockroach Cloud drops idle connections; ping ones that sat a while.
+        if conn.closed or time.time() - _last_used.get(id(conn), time.time()) > IDLE_CHECK_SECONDS:
+            try:
+                with conn.cursor() as c:
+                    c.execute("SELECT 1")
+                conn.rollback()
+            except psycopg2.Error:
+                p.putconn(conn, close=True)
+                conn = p.getconn()
+        self._conn = conn
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+    def close(self):
+        conn, self._conn = self._conn, None
+        if conn is None:
+            return
+        broken = bool(conn.closed)
+        if not broken:
+            try:
+                conn.rollback()
+            except psycopg2.Error:
+                broken = True
+        _last_used[id(conn)] = time.time()
+        _get_pool().putconn(conn, close=broken)
+
+
 def get_conn():
-    return psycopg2.connect(os.environ["COCKROACH_URL"])
+    return PooledConn()
 
 def create_session(cur, title="New chat"):
     cur.execute(

@@ -1,7 +1,23 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import logging
+import threading
 from routers import chat, stats, company, applications, roadmap, resume, github
+from services.mcp_client import get_schema_text
+
 app = FastAPI()
+
+
+@app.on_event("startup")
+def warm_chat_schema():
+    # Build the chat agent's schema context in the background so the first
+    # real question after a deploy doesn't pay for introspection.
+    def _warm():
+        try:
+            get_schema_text()
+        except Exception:
+            logging.getLogger(__name__).exception("Schema warm-up failed")
+    threading.Thread(target=_warm, daemon=True).start()
 
 app.add_middleware(
     CORSMiddleware,
